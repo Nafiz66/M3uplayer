@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Private Stream Player</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    :root {
+      --bg-dark: #0a0e17;
+      --panel-bg: #111827;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --text-muted: #9ca3af;
+      --border-color: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { display: flex; height: 100vh; background: var(--bg-dark); color: #fff; overflow: hidden; }
+
+    /* Linke Leiste (Navigation & Liste) */
+    #sidebar { width: 380px; display: flex; flex-direction: column; background: var(--panel-bg); border-right: 1px solid var(--border-color); }
+
+    /* IBO-Style Top Tabs */
+    .media-tabs { display: flex; border-bottom: 1px solid var(--border-color); background: #0c121e; }
+    .media-tab {
+      flex: 1; padding: 14px 8px; text-align: center; font-size: 13px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; color: var(--text-muted);
+      border-bottom: 2px solid transparent; transition: all 0.2s;
+    }
+    .media-tab:hover { color: #fff; background: rgba(255,255,255,0.03); }
+    .media-tab.active { color: #fff; border-bottom: 2px solid var(--accent); background: rgba(37,99,235,0.1); }
+
+    /* Suche */
+    .search-bar { padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
+    .search-bar input {
+      width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color);
+      background: #080c14; color: #fff; font-size: 13px; outline: none;
+    }
+    .search-bar input:focus { border-color: var(--accent); }
+
+    /* Akkordeon & Kanalliste */
+    #category-container { flex: 1; overflow-y: auto; padding: 8px; }
+    
+    .group-item { margin-bottom: 6px; border-radius: 6px; overflow: hidden; background: #0c121e; }
+    .group-header {
+      padding: 10px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center;
+      background: #151d2c; user-select: none;
+    }
+    .group-header:hover { background: #1a2538; }
+    .group-count { font-size: 11px; color: var(--text-muted); background: #080c14; padding: 2px 6px; border-radius: 10px; }
+    .group-channels { display: none; list-style: none; padding: 4px 0; }
+    .group-item.open .group-channels { display: block; }
+    .group-item.open .arrow { transform: rotate(90deg); }
+    .arrow { font-size: 10px; transition: transform 0.2s; display: inline-block; margin-right: 6px; }
+
+    .channel-row {
+      padding: 8px 12px 8px 26px; font-size: 13px; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      color: #cbd5e1; border-left: 2px solid transparent;
+    }
+    .channel-row:hover { background: rgba(255,255,255,0.05); color: #fff; }
+    .channel-row.active { background: rgba(37,99,235,0.15); border-left-color: var(--accent); color: #fff; font-weight: 600; }
+
+    /* Untere Leiste mit versteckten Einstellungen */
+    .sidebar-footer {
+      padding: 10px 14px; border-top: 1px solid var(--border-color); display: flex;
+      justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted);
+    }
+    .settings-btn {
+      background: none; border: none; color: var(--text-muted); font-size: 18px;
+      cursor: pointer; padding: 4px 8px; border-radius: 4px;
+    }
+    .settings-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
+    /* Video Player */
+    #player-container { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #000; position: relative; }
+    video { width: 100%; height: 100%; max-height: 100vh; background: #000; }
+    #current-title {
+      position: absolute; top: 16px; left: 20px; background: rgba(0,0,0,0.65);
+      padding: 6px 12px; border-radius: 6px; font-size: 14px; pointer-events: none;
+      display: none;
+    }
+
+    /* Modales Einstellungsfenster (Upload & M3U URL) */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px); z-index: 100; justify-content: center; align-items: center;
+    }
+    .modal-box {
+      background: #111827; border: 1px solid var(--border-color); border-radius: 10px;
+      width: 440px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .modal-box h3 { margin-bottom: 12px; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .close-modal { cursor: pointer; color: var(--text-muted); font-size: 18px; }
+    .modal-box input[type="text"] {
+      width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);
+      background: #080c14; color: #fff; margin-bottom: 10px; font-size: 13px; outline: none;
+    }
+    .modal-box button {
+      width: 100%; padding: 10px; border-radius: 6px; border: none; background: var(--accent);
+      color: #fff; font-weight: 600; cursor: pointer; margin-bottom: 8px; font-size: 13px;
+    }
+    .modal-box button:hover { background: var(--accent-hover); }
+    .danger-btn { background: #dc2626 !important; margin-top: 10px; }
+    .danger-btn:hover { background: #b91c1c !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Linke Navigationsspalte -->
+  <div id="sidebar">
+    <!-- IBO TV Kategorie-Tabs -->
+    <div class="media-tabs">
+      <div class="media-tab active" onclick="switchMediaType('live')">Live TV</div>
+      <div class="media-tab" onclick="switchMediaType('movie')">Filme</div>
+      <div class="media-tab" onclick="switchMediaType('series')">Serien</div>
+    </div>
+
+    <!-- Suchleiste -->
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Sender oder Titel suchen..." oninput="filterList()">
+    </div>
+
+    <!-- Akkordeon mit Gruppen -->
+    <div id="category-container"></div>
+
+    <!-- Footer mit versteckten Einstellungen -->
+    <div class="sidebar-footer">
+      <span id="status-info">Keine Liste geladen</span>
+      <button class="settings-btn" title="Liste verwalten" onclick="toggleModal(true)">⚙</button>
+    </div>
+  </div>
+
+  <!-- Videoplayer -->
+  <div id="player-container">
+    <div id="current-title"></div>
+    <video id="video" controls autoplay playsinline></video>
+  </div>
+
+  <!-- Verstecktes Modal für den Upload -->
+  <div id="settings-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3>
+        Playlist Einstellungen
+        <span class="close-modal" onclick="toggleModal(false)">✕</span>
+      </h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Deine Daten werden nur lokal im Browser gesichert.</p>
+      
+      <input type="text" id="m3u-url" placeholder="M3U / M3U8 URL einfügen...">
+      <button onclick="loadFromUrl()">Von URL laden</button>
+      
+      <div style="text-align:center; font-size:11px; color:var(--text-muted); margin: 6px 0;">— ODER LOKALE DATEI —</div>
+      
+      <input type="file" id="file-input" accept=".m3u,.m3u8" style="display:none" onchange="loadFromFile(event)">
+      <button style="background:#374151;" onclick="document.getElementById('file-input').click()">M3U Datei vom Gerät wählen</button>
+      
+      <button class="danger-btn" onclick="clearPlaylist()">Gespeicherte Liste löschen</button>
+    </div>
+  </div>
+
+  <script>
+    let allChannels = [];
+    let currentType = 'live'; // 'live', 'movie', 'series'
+    const video = document.getElementById('video');
+    const hls = new Hls();
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const saved = localStorage.getItem('my_ibo_channels');
+      if (saved) {
+        allChannels = JSON.parse(saved);
+        updateStatus();
+        renderCategories();
+      }
+    });
+
+    // M3U Parser mit Typenerkennung (Live vs Filme vs Serien)
+    function parseM3U(content) {
+      const lines = content.split('\n');
+      const list = [];
+      let currentItem = null;
+
+      for (let rawLine of lines) {
+        const line = rawLine.trim();
+        if (line.startsWith('#EXTINF:')) {
+          currentItem = { name: 'Unbekannt', group: 'Allgemein', type: 'live', url: '' };
+
+          // group-title extrahieren
+          const groupMatch = line.match(/group-title="([^"]+)"/i);
+          if (groupMatch) currentItem.group = groupMatch[1];
+
+          // Name extrahieren
+          const commaIndex = line.lastIndexOf(',');
+          if (commaIndex !== -1) {
+            currentItem.name = line.substring(commaIndex + 1).trim();
+          }
+
+          // Automatische Klassifizierung: Live / Movie / Series
+          const lowerGroup = currentItem.group.toLowerCase();
+          const lowerName = currentItem.name.toLowerCase();
+
+          if (lowerGroup.includes('movie') || lowerGroup.includes('film') || lowerGroup.includes('vod') || lowerGroup.includes('kino')) {
+            currentItem.type = 'movie';
+          } else if (lowerGroup.includes('series') || lowerGroup.includes('serie') || lowerGroup.includes('dizi')) {
+            currentItem.type = 'series';
+          } else {
+            currentItem.type = 'live';
+          }
+        } else if (line.length > 0 && !line.startsWith('#') && currentItem) {
+          currentItem.url = line;
+          
+          // Zusätzlicher Check über Dateiendung der Stream-URL
+          const cleanUrl = line.split('?')[0].toLowerCase();
+          if (currentItem.type === 'live') {
+            if (cleanUrl.endsWith('.mp4') || cleanUrl.endsWith('.mkv') || cleanUrl.endsWith('.avi')) {
+              currentItem.type = 'movie';
+            } else if (cleanUrl.includes('/series/')) {
+              currentItem.type = 'series';
+            }
+          }
+
+          list.push(currentItem);
+          currentItem = null;
+        }
+      }
+      return list;
+    }
+
+    function switchMediaType(type) {
+      currentType = type;
+      document.querySelectorAll('.media-tab').forEach((tab, idx) => {
+        const tabTypes = ['live', 'movie', 'series'];
+        tab.classList.toggle('active', tabTypes[idx] === type);
+      });
+      document.getElementById('search-input').value = '';
+      renderCategories();
+    }
+
+    function renderCategories() {
+      const container = document.getElementById('category-container');
+      container.innerHTML = '';
+
+      const search = document.getElementById('search-input').value.toLowerCase();
+      const filtered = allChannels.filter(c => {
+        const matchesType = c.type === currentType;
+        const matchesSearch = c.name.toLowerCase().includes(search) || c.group.toLowerCase().includes(search);
+        return matchesType && matchesSearch;
+      });
+
+      // Gruppieren
+      const groups = {};
+      filtered.forEach(c => {
+        if (!groups[c.group]) groups[c.group] = [];
+        groups[c.group].push(c);
+      });
+
+      const groupNames = Object.keys(groups).sort();
+
+      if (groupNames.length === 0) {
+        container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:13px;">Keine Einträge gefunden.</div>';
+        return;
+      }
+
+      groupNames.forEach(groupName => {
+        const groupEl = document.createElement('div');
+        groupEl.className = 'group-item';
+
+        const header = document.createElement('div');
+        header.className = 'group-header';
+        header.innerHTML = `
+          <div><span class="arrow">▶</span> ${groupName}</div>
+          <span class="group-count">${groups[groupName].length}</span>
+        `;
+        header.onclick = () => groupEl.classList.toggle('open');
+
+        const chList = document.createElement('ul');
+        chList.className = 'group-channels';
+
+        groups[groupName].forEach(ch => {
+          const li = document.createElement('li');
+          li.className = 'channel-row';
+          li.textContent = ch.name;
+          li.title = ch.name;
+          li.onclick = (e) => {
+            e.stopPropagation();
+            playStream(ch.url, ch.name, li);
+          };
+          chList.appendChild(li);
+        });
+
+        groupEl.appendChild(header);
+        groupEl.appendChild(chList);
+        container.appendChild(groupEl);
+      });
+    }
+
+    function filterList() {
+      renderCategories();
+    }
+
+    function playStream(url, name, element) {
+      document.querySelectorAll('.channel-row').forEach(el => el.classList.remove('active'));
+      if (element) element.classList.add('active');
+
+      const titleEl = document.getElementById('current-title');
+      titleEl.style.display = 'block';
+      titleEl.textContent = name;
+
+      if (Hls.isSupported()) {
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play();
+      }
+    }
+
+    // Modal & Laden
+    function toggleModal(show) {
+      document.getElementById('settings-modal').style.display = show ? 'flex' : 'none';
+    }
+
+    async function loadFromUrl() {
+      const url = document.getElementById('m3u-url').value.trim();
+      if (!url) return alert('Bitte URL angeben.');
+      try {
+        const res = await fetch(url);
+        const text = await res.text();
+        saveData(parseM3U(text));
+        toggleModal(false);
+      } catch (err) {
+        alert('CORS-Blockade durch den Server. Bitte lade die .m3u-Datei herunter und nutze den Button "M3U Datei vom Gerät wählen".');
+      }
+    }
+
+    function loadFromFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        saveData(parseM3U(event.target.result));
+        toggleModal(false);
+      };
+      reader.readAsText(file);
+    }
+
+    function saveData(list) {
+      allChannels = list;
+      localStorage.setItem('my_ibo_channels', JSON.stringify(list));
+      updateStatus();
+      renderCategories();
+    }
+
+    function clearPlaylist() {
+      if (confirm('Gesamte Playlist aus dem Speicher löschen?')) {
+        localStorage.removeItem('my_ibo_channels');
+        allChannels = [];
+        updateStatus();
+        renderCategories();
+        video.pause();
+        video.src = '';
+        document.getElementById('current-title').style.display = 'none';
+        toggleModal(false);
+      }
+    }
+
+    function updateStatus() {
+      const info = document.getElementById('status-info');
+      if (allChannels.length > 0) {
+        info.textContent = `${allChannels.length} Einträge gespeichert`;
+      } else {
+        info.textContent = 'Keine Liste geladen';
+      }
+    }
+  </script>
+</body>
+</html>
