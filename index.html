@@ -149,6 +149,9 @@
     const video = document.getElementById('video');
     let hls = null;
 
+    // Basis-URL deines Cloudflare Workers zur Mixed-Content-Überbrückung
+    const PROXY_BASE = "https://stream-proxy.alaturka88-na.workers.dev/?url=";
+
     // --- IndexedDB Initialisierung ---
     const DB_NAME = 'StreamPlayerDB';
     const DB_VERSION = 1;
@@ -192,7 +195,7 @@
       return new Promise((resolve) => tx.oncomplete = () => resolve());
     }
 
-    // --- Start beim Seitenaufruf ---
+    // --- Start beim Laden der Seite ---
     window.addEventListener('DOMContentLoaded', async () => {
       try {
         allChannels = await loadFromDB();
@@ -329,7 +332,9 @@
         hls = null;
       }
 
-      // Prüfen auf HLS (.m3u8) vs Direkter MP4/MKV Stream
+      // Stream über Cloudflare Worker leiten, wenn es eine HTTP-URL ist
+      const playableUrl = url.startsWith("http://") ? (PROXY_BASE + encodeURIComponent(url)) : url;
+
       const isHls = url.includes('.m3u8') || (!url.includes('.mp4') && !url.includes('.mkv'));
 
       if (isHls && Hls.isSupported()) {
@@ -337,7 +342,7 @@
           enableWorker: true,
           lowLatencyMode: true
         });
-        hls.loadSource(url);
+        hls.loadSource(playableUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
         hls.on(Hls.Events.ERROR, (_, data) => {
@@ -346,7 +351,7 @@
           }
         });
       } else {
-        video.src = url;
+        video.src = playableUrl;
         video.play().catch(() => {});
       }
     }
@@ -356,15 +361,22 @@
     }
 
     async function loadFromUrl() {
-      const url = document.getElementById('m3u-url').value.trim();
-      if (!url) return alert('Bitte URL angeben.');
+      const inputUrl = document.getElementById('m3u-url').value.trim();
+      if (!inputUrl) return alert('Bitte URL angeben.');
+      
+      // Nutzt den Cloudflare Proxy auch zum Abrufen der M3U-URL (verhindert CORS-Fehler beim Import)
+      const fetchUrl = inputUrl.startsWith("http://") ? (PROXY_BASE + encodeURIComponent(inputUrl)) : inputUrl;
+
+      document.getElementById('status-info').textContent = 'Lade URL über Proxy...';
       try {
-        const res = await fetch(url);
+        const res = await fetch(fetchUrl);
+        if (!res.ok) throw new Error('Netzwerk-Antwort war nicht OK');
         const text = await res.text();
         await saveData(parseM3U(text));
         toggleModal(false);
       } catch (err) {
-        alert('CORS-Blockade durch den Server. Bitte lade die Datei im Browser herunter und nutze den Button "M3U Datei vom Gerät wählen".');
+        alert('Fehler beim Abrufen der URL. Nutze alternativ den Button "M3U Datei vom Gerät wählen".');
+        updateStatus();
       }
     }
 
