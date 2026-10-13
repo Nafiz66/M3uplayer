@@ -354,6 +354,46 @@
         video.src = playableUrl;
         video.play().catch(() => {});
       }
+    }function playStream(url, name, element) {
+      document.querySelectorAll('.channel-row').forEach(el => el.classList.remove('active'));
+      if (element) element.classList.add('active');
+
+      const titleEl = document.getElementById('current-title');
+      titleEl.style.display = 'block';
+      titleEl.textContent = name;
+
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+
+      // Direkte URL ohne Cloudflare-Proxy, um den 403-IP-Block zu umgehen
+      const playableUrl = url;
+
+      const isHls = playableUrl.includes('.m3u8') || (!playableUrl.includes('.mp4') && !playableUrl.includes('.mkv'));
+
+      if (isHls && Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          xhrSetup: function (xhr, u) {
+            xhr.withCredentials = false;
+          }
+        });
+        hls.loadSource(playableUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(e => console.log('Autoplay blockiert:', e));
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            console.error('Fataler HLS-Fehler:', data);
+          }
+        });
+      } else {
+        video.src = playableUrl;
+        video.play().catch(e => console.log('Video Play Error:', e));
+      }
     }
 
     function toggleModal(show) {
